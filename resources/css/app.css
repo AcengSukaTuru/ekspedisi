@@ -1,0 +1,73 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    [x-cloak] {
+        display: none !important;
+    }
+
+    body {
+        @apply bg-slate-950 text-slate-100 antialiased;
+        font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    }
+
+    code,
+    pre,
+    .font-mono {
+        font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+    }
+
+    ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+        @apply bg-slate-950;
+    }
+
+    ::-webkit-scrollbar-thumb {
+        @apply rounded-full bg-slate-700;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+        @apply bg-slate-600;
+    }
+}
+
+@layer components {
+    .app-body {
+        @apply bg-slate-950 text-slate-100;
+    }
+
+    .panel-dark {
+        @apply rounded-[1.75rem] border border-slate-800 bg-slate-900 shadow-2xl shadow-slate-950/30;
+    }
+
+    .panel-soft {
+        @apply rounded-[1.5rem] border border-slate-800/80 bg-slate-900/70;
+    }
+
+    .input-dark {
+        @apply mt-1 w-full rounded-2xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20;
+    }
+
+    .textarea-dark {
+        @apply mt-1 w-full rounded-2xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20;
+    }
+
+    .select-dark {
+        @apply mt-1 w-full rounded-2xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-white focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20;
+    }
+
+    .btn-primary-dark {
+        @apply inline-flex items-center justify-center rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-500;
+    }
+
+    .btn-secondary-dark {
+        @apply inline-flex items-center justify-center rounded-2xl border border-slate-700 bg-slate-800 px-5 py-3 text-sm font-semibold text-slate-200 transition hover:border-slate-600 hover:bg-slate-700;
+    }
+}
