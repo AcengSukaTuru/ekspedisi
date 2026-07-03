@@ -6,6 +6,7 @@ namespace App\Models;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
@@ -65,6 +66,16 @@ class User extends Authenticatable
     public function customer(): HasOne
     {
         return $this->hasOne(Customer::class);
+    }
+
+    public function courierAssignments(): HasMany
+    {
+        return $this->hasMany(ShipmentAssignment::class, 'courier_id');
+    }
+
+    public function createdAssignments(): HasMany
+    {
+        return $this->hasMany(ShipmentAssignment::class, 'assigned_by');
     }
 
     public function isAdmin(): bool

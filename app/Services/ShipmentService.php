@@ -38,6 +38,9 @@ class ShipmentService
             ? Carbon::parse($attributes['initial_tracking_at'])
             : now();
 
+        $pickupType = $attributes['pickup_type'] ?? Shipment::PICKUP_DROP_OFF;
+        $paymentType = $attributes['payment_type'] ?? Payment::TYPE_PREPAID;
+
         return DB::transaction(function () use (
             $attributes,
             $customer,
@@ -46,7 +49,9 @@ class ShipmentService
             $photoPath,
             $rate,
             $shipmentDate,
-            $shippingCost
+            $shippingCost,
+            $pickupType,
+            $paymentType
         ) {
             $shipment = Shipment::create([
                 'tracking_number' => $this->generateTrackingNumber(),
@@ -63,7 +68,17 @@ class ShipmentService
                 'total_weight' => $attributes['total_weight'],
                 'shipping_cost' => $shippingCost,
                 'service_type' => $attributes['service_type'],
-                'status' => Shipment::STATUS_PENDING,
+                'pickup_type' => $pickupType,
+                'pickup_address' => $pickupType === Shipment::PICKUP_REQUEST
+                    ? ($attributes['pickup_address'] ?? $attributes['sender_address'])
+                    : null,
+                'pickup_contact_name' => $pickupType === Shipment::PICKUP_REQUEST
+                    ? ($attributes['pickup_contact_name'] ?? $attributes['sender_name'])
+                    : null,
+                'pickup_contact_phone' => $pickupType === Shipment::PICKUP_REQUEST
+                    ? ($attributes['pickup_contact_phone'] ?? $attributes['sender_phone'])
+                    : null,
+                'status' => Shipment::STATUS_CREATED,
                 'shipment_date' => $shipmentDate->toDateString(),
                 'estimated_arrival' => $estimatedArrival->toDateString(),
             ]);
@@ -76,15 +91,22 @@ class ShipmentService
                 'photo' => $photoPath,
             ]);
 
+            // Payment: prepaid = langsung pending, COD = pending (nanti bayar saat terima)
             $shipment->payment()->create([
                 'amount' => $shippingCost,
+                'payment_type' => $paymentType,
                 'payment_status' => Payment::STATUS_PENDING,
             ]);
 
+            // Tracking awal
+            $trackingDescription = $pickupType === Shipment::PICKUP_REQUEST
+                ? 'Pesanan dibuat. Menunggu kurir menjemput paket dari pengirim.'
+                : 'Pesanan dibuat. Silakan antar paket ke cabang terdekat.';
+
             $shipment->shipmentTrackings()->create([
-                'status' => Shipment::STATUS_PENDING,
+                'status' => Shipment::STATUS_CREATED,
                 'location' => $rate->originBranch?->city ?? 'Gudang',
-                'description' => 'Shipment berhasil dibuat dan menunggu proses admin.',
+                'description' => $trackingDescription,
                 'tracked_at' => $initialTrackingAt,
             ]);
 

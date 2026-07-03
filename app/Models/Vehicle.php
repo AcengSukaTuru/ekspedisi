@@ -22,4 +22,19 @@ class Vehicle extends Model
     {
         return $this->hasMany(Shipment::class);
     }
+
+    public function activeShipments(): HasMany
+    {
+        return $this->hasMany(Shipment::class)->where('status', '!=', Shipment::STATUS_DELIVERED);
+    }
+
+    public function assignments(): HasMany
+    {
+        return $this->hasMany(ShipmentAssignment::class);
+    }
+
+    public function activeAssignments(): HasMany
+    {
+        return $this->hasMany(ShipmentAssignment::class)->where('status', 'active');
+    }
 }

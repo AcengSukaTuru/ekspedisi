@@ -7,6 +7,7 @@ use App\Models\Payment;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
@@ -37,7 +38,7 @@ class PaymentController extends Controller
 
     public function show(Request $request, Payment $payment): View
     {
-        $payment = $this->authorizePaymentAccess($request->user(), $payment);
+        Gate::authorize('view', $payment);
         $payment->load(['shipment.customer', 'shipment.originBranch', 'shipment.destinationBranch', 'verifier']);
 
         return view('payments.show', [
@@ -53,8 +54,7 @@ class PaymentController extends Controller
 
     public function submitByCustomer(Request $request, Payment $payment): RedirectResponse
     {
-        $payment = $this->authorizePaymentAccess($request->user(), $payment);
-        abort_unless($request->user()->isCustomer(), 403, 'Hanya customer yang dapat mengirim pembayaran.');
+        Gate::authorize('update', $payment);
 
         if ($payment->payment_status === Payment::STATUS_PAID) {
             return redirect()
@@ -108,8 +108,7 @@ class PaymentController extends Controller
 
     public function verifyByAdmin(Request $request, Payment $payment): RedirectResponse
     {
-        $payment = $this->authorizePaymentAccess($request->user(), $payment);
-        abort_unless($request->user()->isAdmin(), 403, 'Hanya admin yang dapat memverifikasi pembayaran.');
+        Gate::authorize('verify', $payment);
 
         $validated = $request->validate([
             'payment_status' => ['required', 'string', Rule::in(Payment::statuses())],
@@ -136,21 +135,4 @@ class PaymentController extends Controller
             ->with('success', 'Status pembayaran berhasil diperbarui.');
     }
 
-    private function authorizePaymentAccess(User $user, Payment $payment): Payment
-    {
-        $payment->loadMissing('shipment');
-
-        if ($user->isAdmin()) {
-            return $payment;
-        }
-
-        if ($user->isCustomer()) {
-            $customer = $this->currentCustomer($user);
-            abort_unless($payment->shipment && $payment->shipment->customer_id === $customer->id, 403, 'Anda tidak memiliki akses ke pembayaran ini.');
-
-            return $payment;
-        }
-
-        abort(403, 'Anda tidak memiliki akses ke pembayaran ini.');
-    }
 }
