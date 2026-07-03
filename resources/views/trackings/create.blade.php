@@ -1,46 +1,64 @@
 <x-app-layout>
     <x-slot name="header">
-        <h2 class="font-semibold text-xl text-gray-800 leading-tight">Tambah Tracking Shipment</h2>
+        <h2 class="text-xl font-bold text-slate-900 dark:text-white">Tambah Tracking</h2>
     </x-slot>
 
-    <div class="py-8">
-        <div class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
-            @include('partials.flash-message')
+    <div class="mx-auto max-w-3xl space-y-6">
+        @include('partials.flash-message')
 
-            <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                <div class="mb-4 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
-                    <p class="font-semibold text-slate-900">{{ $shipment->tracking_number }}</p>
-                    <p>{{ $shipment->originBranch?->branch_name }} -> {{ $shipment->destinationBranch?->branch_name }}</p>
+        <div class="card p-6">
+            <div class="mb-5 rounded-xl bg-slate-50 p-4 dark:bg-slate-800/50">
+                <p class="font-bold text-slate-900 dark:text-white">{{ $shipment->tracking_number }}</p>
+                <p class="text-sm text-slate-500 dark:text-slate-400">{{ $shipment->originBranch?->branch_name }} &rarr; {{ $shipment->destinationBranch?->branch_name }}</p>
+                @if ($shipment->activeAssignment)
+                    <div class="mt-2 flex gap-4 text-xs text-slate-500 dark:text-slate-400">
+                        <span>Kurir: <strong class="text-slate-900 dark:text-white">{{ $shipment->activeAssignment->courier?->name }}</strong></span>
+                        <span>Kendaraan: <strong class="text-slate-900 dark:text-white">{{ $shipment->activeAssignment->vehicle?->plate_number }}</strong></span>
+                    </div>
+                @endif
+                <p class="mt-2 text-xs">Status: <span class="badge {{ $shipment->statusColor() }}">{{ $shipment->statusLabel() }}</span></p>
+            </div>
+
+            @if (count($validStatuses) === 0)
+                <div class="rounded-xl bg-amber-50 p-4 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
+                    <p class="font-semibold">Tidak ada update status yang bisa dilakukan.</p>
+                    <p class="mt-1">Shipment sudah dalam status akhir ({{ $shipment->statusLabel() }}).</p>
                 </div>
-
-                <form method="POST" action="{{ route('courier.trackings.store', $shipment) }}" class="grid gap-4">
+            @else
+                <form method="POST" action="{{ route('courier.trackings.store', $shipment) }}" enctype="multipart/form-data" class="grid gap-4">
                     @csrf
                     <div>
-                        <label for="status" class="text-sm font-medium text-slate-700">Status</label>
-                        <select id="status" name="status" class="mt-1 w-full rounded-lg border-slate-300" required>
-                            @foreach (['picked_up', 'in_transit', 'delivered'] as $status)
-                                <option value="{{ $status }}" @selected(old('status', $shipment->status) === $status)>{{ $status }}</option>
+                        <label class="text-xs font-medium text-slate-600 dark:text-slate-400">Status</label>
+                        <select name="status" class="select" required>
+                            @foreach ($validStatuses as $vs)
+                                <option value="{{ $vs }}">{{ $statusLabels[$vs] ?? $vs }}</option>
                             @endforeach
                         </select>
+                        <p class="mt-1 text-[10px] text-slate-400">Hanya status valid dari status saat ini.</p>
                     </div>
                     <div>
-                        <label for="location" class="text-sm font-medium text-slate-700">Lokasi</label>
-                        <input id="location" name="location" type="text" value="{{ old('location', $shipment->vehicle?->plate_number) }}" class="mt-1 w-full rounded-lg border-slate-300" required>
+                        <label class="text-xs font-medium text-slate-600 dark:text-slate-400">Lokasi</label>
+                        <input name="location" type="text" value="{{ old('location', $shipment->activeAssignment->vehicle?->plate_number ?? $shipment->originBranch?->city) }}" class="input" required>
                     </div>
                     <div>
-                        <label for="tracked_at" class="text-sm font-medium text-slate-700">Waktu Tracking</label>
-                        <input id="tracked_at" name="tracked_at" type="datetime-local" value="{{ old('tracked_at', now()->format('Y-m-d\\TH:i')) }}" class="mt-1 w-full rounded-lg border-slate-300" required>
+                        <label class="text-xs font-medium text-slate-600 dark:text-slate-400">Waktu Tracking</label>
+                        <input name="tracked_at" type="datetime-local" value="{{ old('tracked_at', now()->format('Y-m-d\\TH:i')) }}" class="input" required>
                     </div>
                     <div>
-                        <label for="description" class="text-sm font-medium text-slate-700">Keterangan</label>
-                        <textarea id="description" name="description" rows="3" class="mt-1 w-full rounded-lg border-slate-300">{{ old('description') }}</textarea>
+                        <label class="text-xs font-medium text-slate-600 dark:text-slate-400">Keterangan</label>
+                        <textarea name="description" rows="3" class="input">{{ old('description') }}</textarea>
+                    </div>
+                    <div>
+                        <label class="text-xs font-medium text-slate-600 dark:text-slate-400">Foto Bukti (opsional)</label>
+                        <input name="proof_photo" type="file" accept=".jpg,.jpeg,.png" class="input">
+                        <p class="mt-1 text-[10px] text-slate-400">Maks 2MB. JPG/PNG.</p>
                     </div>
                     <div class="flex gap-3">
-                        <button type="submit" class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Simpan Tracking</button>
-                        <a href="{{ route('courier.shipments.show', $shipment) }}" class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Kembali</a>
+                        <button type="submit" class="btn-primary">Simpan Tracking</button>
+                        <a href="{{ route('courier.shipments.show', $shipment) }}" class="btn-secondary">Batal</a>
                     </div>
                 </form>
-            </div>
+            @endif
         </div>
     </div>
 </x-app-layout>
