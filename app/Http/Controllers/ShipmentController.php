@@ -12,6 +12,7 @@ use App\Models\Vehicle;
 use App\Services\ShipmentService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\View\View;
 
 class ShipmentController extends Controller
@@ -22,7 +23,7 @@ class ShipmentController extends Controller
     {
         return view('shipments.index', [
             'shipments' => Shipment::query()
-                ->with(['customer', 'originBranch', 'destinationBranch', 'vehicle', 'payment'])
+                ->with(['customer', 'originBranch', 'destinationBranch', 'vehicle', 'payment', 'activeAssignment.courier'])
                 ->latest()
                 ->paginate(10),
             'title' => 'Semua Shipment',
@@ -36,7 +37,7 @@ class ShipmentController extends Controller
 
         return view('shipments.index', [
             'shipments' => Shipment::query()
-                ->with(['originBranch', 'destinationBranch', 'vehicle', 'payment'])
+                ->with(['originBranch', 'destinationBranch', 'vehicle', 'payment', 'activeAssignment.courier'])
                 ->where('customer_id', $customer->id)
                 ->latest()
                 ->paginate(10),
@@ -45,12 +46,14 @@ class ShipmentController extends Controller
         ]);
     }
 
-    public function courierIndex(): View
+    public function courierIndex(Request $request): View
     {
         return view('shipments.index', [
             'shipments' => Shipment::query()
-                ->with(['customer', 'originBranch', 'destinationBranch', 'vehicle', 'payment'])
-                ->whereNotNull('vehicle_id')
+                ->with(['customer', 'originBranch', 'destinationBranch', 'vehicle', 'payment', 'activeAssignment.vehicle'])
+                ->whereHas('activeAssignment', function ($q) use ($request) {
+                    $q->where('courier_id', $request->user()->id);
+                })
                 ->latest()
                 ->paginate(10),
             'title' => 'Tugas Kurir',
@@ -101,6 +104,13 @@ class ShipmentController extends Controller
             'quantity' => ['required', 'integer', 'min:1'],
             'description' => ['nullable', 'string'],
             'photo' => ['nullable', 'image', 'max:2048'],
+            // Pickup type
+            'pickup_type' => ['nullable', 'string', 'in:drop_off,pickup_request'],
+            'pickup_address' => ['required_if:pickup_type,pickup_request', 'nullable', 'string'],
+            'pickup_contact_name' => ['nullable', 'string', 'max:255'],
+            'pickup_contact_phone' => ['nullable', 'string', 'max:20'],
+            // Payment type
+            'payment_type' => ['nullable', 'string', 'in:prepaid,cod'],
         ]);
 
         $photoPath = $request->hasFile('photo')
@@ -116,7 +126,7 @@ class ShipmentController extends Controller
 
     public function show(Request $request, Shipment $shipment): View
     {
-        $this->authorizeShipmentAccess($request->user(), $shipment);
+        Gate::authorize('view', $shipment);
 
         $shipment->load([
             'customer.user',
@@ -124,14 +134,25 @@ class ShipmentController extends Controller
             'destinationBranch',
             'vehicle',
             'shipmentItems',
-            'payment',
+            'payment.collectedBy',
+            'activeAssignment.courier',
+            'activeAssignment.vehicle',
+            'assignments.courier',
+            'assignments.vehicle',
+            'assignments.assignedBy',
+            'deliveryAttempts.attemptedBy',
             'shipmentTrackings' => fn ($query) => $query->latest('tracked_at'),
         ]);
 
         return view('shipments.show', [
             'shipment' => $shipment,
+            'statusLabels' => Shipment::statusLabels(),
+            'statusColors' => Shipment::statusColors(),
             'availableVehicles' => $request->user()->isAdmin()
                 ? Vehicle::query()->orderBy('plate_number')->get()
+                : collect(),
+            'availableCouriers' => $request->user()->isAdmin()
+                ? User::where('role', User::ROLE_COURIER)->orderBy('name')->get()
                 : collect(),
             'backRoute' => match (true) {
                 $request->user()->isAdmin() => 'admin.shipments.index',
@@ -141,38 +162,100 @@ class ShipmentController extends Controller
         ]);
     }
 
+    public function invoice(Request $request, Shipment $shipment): View
+    {
+        Gate::authorize('view', $shipment);
+
+        $shipment->load([
+            'customer.user',
+            'originBranch',
+            'destinationBranch',
+            'shipmentItems',
+            'payment',
+        ]);
+
+        return view('shipments.invoice', [
+            'shipment' => $shipment,
+        ]);
+    }
+
+    public function label(Request $request, Shipment $shipment): View
+    {
+        Gate::authorize('view', $shipment);
+
+        $shipment->load([
+            'originBranch',
+            'destinationBranch',
+            'shipmentItems',
+        ]);
+
+        return view('shipments.label', [
+            'shipment' => $shipment,
+        ]);
+    }
+
     public function updateStatus(Request $request, Shipment $shipment): RedirectResponse
     {
+        Gate::authorize('updateStatus', $shipment);
+
         $validated = $request->validate([
-            'status' => ['required', 'string', 'max:50'],
-            'vehicle_id' => ['nullable', 'exists:vehicles,id'],
+            'status' => ['required', 'string', 'in:'.implode(',', Shipment::statuses())],
             'estimated_arrival' => ['nullable', 'date'],
             'tracking_location' => ['nullable', 'string', 'max:255'],
             'tracking_description' => ['nullable', 'string'],
         ]);
 
-        $shipment->loadMissing(['originBranch', 'vehicle']);
+        $newStatus = $validated['status'];
+
+        // Validasi transisi status
+        if (! $shipment->canTransitionTo($newStatus)) {
+            return redirect()
+                ->back()
+                ->with('error', "Status tidak bisa diubah dari '{$shipment->status}' ke '{$newStatus}'. Status berikutnya yang valid: ".implode(', ', $shipment->validNextStatuses()).'.');
+        }
+
+        $shipment->loadMissing(['originBranch', 'activeAssignment.vehicle']);
+
+        $oldStatus = $shipment->status;
 
         $shipment->fill([
-            'status' => $validated['status'],
-            'vehicle_id' => $validated['vehicle_id'] ?? null,
+            'status' => $newStatus,
             'estimated_arrival' => $validated['estimated_arrival'] ?? $shipment->estimated_arrival,
         ]);
 
-        $shouldCreateTracking = $shipment->isDirty(['status', 'vehicle_id']) || ! empty($validated['tracking_description']);
-
         $shipment->save();
-        $shipment->load('vehicle');
 
-        if ($shouldCreateTracking) {
-            $shipment->shipmentTrackings()->create([
-                'status' => $validated['status'],
-                'location' => $validated['tracking_location'] ?: $this->defaultTrackingLocation($shipment),
-                'description' => $validated['tracking_description'] ?: 'Status shipment diperbarui oleh admin.',
-                'tracked_at' => now(),
-            ]);
+        // Tracking entry
+        $defaultDesc = Shipment::statusLabels()[$newStatus] ?? 'Status diperbarui oleh admin.';
+        $shipment->shipmentTrackings()->create([
+            'status' => $newStatus,
+            'location' => $validated['tracking_location'] ?: $this->defaultTrackingLocation($shipment),
+            'description' => $validated['tracking_description'] ?: $defaultDesc,
+            'tracked_at' => now(),
+            'created_by' => $request->user()->id,
+        ]);
+
+        // Auto-complete assignment if delivered
+        if ($newStatus === Shipment::STATUS_DELIVERED) {
+            $this->completeActiveAssignment($shipment);
         }
 
-        return redirect()->route('admin.shipments.show', $shipment)->with('success', 'Shipment berhasil diperbarui.');
+        return redirect()
+            ->route('admin.shipments.show', $shipment)
+            ->with('success', "Status berhasil diubah dari '{$oldStatus}' ke '".(Shipment::statusLabels()[$newStatus] ?? $newStatus)."'.");
+    }
+
+    /**
+     * Helper: complete active assignment
+     */
+    private function completeActiveAssignment(Shipment $shipment): void
+    {
+        $activeAssignment = $shipment->activeAssignment;
+        if ($activeAssignment && $activeAssignment->status === 'active') {
+            $activeAssignment->update([
+                'status' => 'completed',
+                'completed_at' => now(),
+            ]);
+        }
     }
 }
