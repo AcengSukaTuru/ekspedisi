@@ -25,24 +25,60 @@ class DashboardController extends Controller
 
     public function admin(): View
     {
+        $totalShipments = Shipment::count();
+        $statusCounts = Shipment::query()
+            ->selectRaw('status, count(*) as total')
+            ->groupBy('status')
+            ->pluck('total', 'status');
+
         $stats = [
-            ['label' => 'Total Shipment', 'value' => Shipment::count()],
-            ['label' => 'Shipment Pending', 'value' => Shipment::where('status', Shipment::STATUS_PENDING)->count()],
-            ['label' => 'Shipment Delivered', 'value' => Shipment::where('status', Shipment::STATUS_DELIVERED)->count()],
+            ['label' => 'Total Shipment', 'value' => $totalShipments],
+            ['label' => 'Shipment Aktif', 'value' => Shipment::whereNotIn('status', [Shipment::STATUS_DELIVERED, Shipment::STATUS_RETURNED_TO_SENDER])->count()],
+            ['label' => 'Sudah Sampai', 'value' => Shipment::where('status', Shipment::STATUS_DELIVERED)->count()],
+            ['label' => 'Gagal / RTS', 'value' => Shipment::whereIn('status', [Shipment::STATUS_FAILED_DELIVERY, Shipment::STATUS_RETURNED_TO_SENDER])->count()],
             ['label' => 'Payment Pending', 'value' => Payment::where('payment_status', Payment::STATUS_PENDING)->count()],
+            ['label' => 'Revenue Paid', 'value' => 'Rp '.number_format((float) Payment::where('payment_status', Payment::STATUS_PAID)->sum('amount'), 0, ',', '.')],
         ];
 
         $recentShipments = Shipment::query()
-            ->with(['customer', 'originBranch', 'destinationBranch', 'vehicle'])
+            ->with(['customer', 'originBranch', 'destinationBranch', 'vehicle', 'activeAssignment.courier', 'activeAssignment.vehicle'])
+            ->latest()
+            ->take(6)
+            ->get();
+
+        $recentPayments = Payment::query()
+            ->with(['shipment.customer'])
             ->latest()
             ->take(5)
             ->get();
 
-        return view('dashboard.index', [
+        $attentionShipments = Shipment::query()
+            ->with(['customer', 'originBranch', 'destinationBranch', 'payment', 'activeAssignment'])
+            ->where(function ($query) {
+                $query->whereIn('status', [Shipment::STATUS_CREATED, Shipment::STATUS_FAILED_DELIVERY])
+                    ->orWhereDoesntHave('activeAssignment')
+                    ->orWhereHas('payment', fn ($payment) => $payment->where('payment_status', Payment::STATUS_PENDING));
+            })
+            ->latest()
+            ->take(5)
+            ->get();
+
+        $statusDistribution = collect(Shipment::statuses())
+            ->map(fn ($status) => [
+                'status' => $status,
+                'label' => Shipment::statusLabels()[$status] ?? $status,
+                'count' => (int) ($statusCounts[$status] ?? 0),
+                'percentage' => $totalShipments > 0 ? round(((int) ($statusCounts[$status] ?? 0) / $totalShipments) * 100) : 0,
+            ]);
+
+        return view('dashboard.admin', [
             'title' => 'Dashboard Admin',
-            'subtitle' => 'Kelola seluruh data ekspedisi dari satu tempat.',
+            'subtitle' => 'Kelola shipment, payment, kurir, dan performa operasional dari satu control center.',
             'stats' => $stats,
             'recentShipments' => $recentShipments,
+            'recentPayments' => $recentPayments,
+            'attentionShipments' => $attentionShipments,
+            'statusDistribution' => $statusDistribution,
             'role' => User::ROLE_ADMIN,
         ]);
     }
@@ -79,20 +115,21 @@ class DashboardController extends Controller
         ]);
     }
 
-    public function courier(): View
+    public function courier(Request $request): View
     {
-        $shipmentQuery = Shipment::query()->whereNotNull('vehicle_id');
+        $courierId = $request->user()->id;
+        $shipmentQuery = Shipment::query()->whereHas('activeAssignment', fn ($q) => $q->where('courier_id', $courierId));
 
         $stats = [
-            ['label' => 'Tugas Aktif', 'value' => (clone $shipmentQuery)->where('status', '!=', Shipment::STATUS_DELIVERED)->count()],
+            ['label' => 'Tugas Aktif', 'value' => (clone $shipmentQuery)->whereNotIn('status', [Shipment::STATUS_DELIVERED, Shipment::STATUS_RETURNED_TO_SENDER])->count()],
             ['label' => 'Dalam Perjalanan', 'value' => (clone $shipmentQuery)->where('status', Shipment::STATUS_IN_TRANSIT)->count()],
+            ['label' => 'Gagal Dikirim', 'value' => (clone $shipmentQuery)->where('status', Shipment::STATUS_FAILED_DELIVERY)->count()],
             ['label' => 'Sudah Selesai', 'value' => (clone $shipmentQuery)->where('status', Shipment::STATUS_DELIVERED)->count()],
-            ['label' => 'Semua Tugas', 'value' => (clone $shipmentQuery)->count()],
         ];
 
         $recentShipments = Shipment::query()
-            ->with(['customer', 'originBranch', 'destinationBranch', 'vehicle'])
-            ->whereNotNull('vehicle_id')
+            ->with(['customer', 'originBranch', 'destinationBranch', 'activeAssignment.vehicle'])
+            ->whereHas('activeAssignment', fn ($q) => $q->where('courier_id', $courierId))
             ->latest()
             ->take(5)
             ->get();
